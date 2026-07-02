@@ -1,5 +1,9 @@
 best_model.pth
 *.pth
+moduleyolola
+backend
+hf_space
+render.yaml
 backend/.venv
 backend/.pip-cache
 backend/**/__pycache__
