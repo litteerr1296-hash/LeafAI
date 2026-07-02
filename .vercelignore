@@ -3,7 +3,7 @@ best_model.pth
 moduleyolola
 backend
 hf_space
-render.yaml
+deploy
 backend/.venv
 backend/.pip-cache
 backend/**/__pycache__

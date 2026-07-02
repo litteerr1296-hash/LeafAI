@@ -23,7 +23,9 @@ SUPABASE_DB_URL=postgresql://postgres:[YOUR-PASSWORD]@db.[PROJECT-REF].supabase.
 
 ## 2. Deploy Django backend on Render
 
-Use the existing `render.yaml`. It now creates only the backend service:
+Use `deploy/render.yaml` when creating the Render Blueprint. It creates only the backend service:
+
+In Render Dashboard, choose Blueprint/New Blueprint from the GitHub repo and set the Blueprint file path to `deploy/render.yaml`.
 
 ```yaml
 name: leafai-backend
@@ -50,8 +52,8 @@ Set these backend environment variables on Render:
 PYTHON_VERSION=3.13.2
 DEBUG=False
 ALLOWED_HOSTS=.onrender.com
-FRONTEND_ORIGIN=https://your-vercel-project.vercel.app
-CORS_ALLOWED_ORIGINS=https://your-vercel-project.vercel.app
+FRONTEND_ORIGIN=https://leafai-frontend.vercel.app
+CORS_ALLOWED_ORIGINS=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$
 CSRF_TRUSTED_ORIGINS=https://leafai-backend.onrender.com,https://*.vercel.app
 SECRET_KEY=<generate a strong secret>
@@ -90,11 +92,11 @@ The Next.js API route `/api/django/...` uses `DJANGO_BASE_URL` to proxy browser 
 
 ## 4. Update Render with final Vercel URL
 
-After Vercel gives the real frontend URL, update these Render backend variables:
+After Vercel gives the real frontend URL, update these Render backend variables if the URL changes:
 
 ```env
-FRONTEND_ORIGIN=https://your-real-project.vercel.app
-CORS_ALLOWED_ORIGINS=https://your-real-project.vercel.app
+FRONTEND_ORIGIN=https://leafai-frontend.vercel.app
+CORS_ALLOWED_ORIGINS=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$
 CSRF_TRUSTED_ORIGINS=https://leafai-backend.onrender.com,https://*.vercel.app
 ```

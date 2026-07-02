@@ -2,7 +2,7 @@
 
 LeafAI là ứng dụng chẩn đoán ảnh lá cây và hỗ trợ canh tác. Repo này chứa cả frontend Next.js và backend Django để người clone về có thể chạy local, phát triển tiếp và deploy.
 
-Repo GitHub: https://github.com/manhfaa/leafai
+Repo GitHub: https://github.com/manhfaa/LeafAI
 
 ## Tính năng hiện có
 
@@ -56,7 +56,7 @@ Repo GitHub: https://github.com/manhfaa/leafai
 ├─ hf_space/                    FastAPI Space cho CNN
 ├─ scripts/deploy_hf_space.py   Script deploy Hugging Face Space
 ├─ DEPLOY_FREE.md               Ghi chú deploy miễn phí
-├─ render.yaml                  Cấu hình Render backend
+├─ deploy/render.yaml           Cấu hình Render backend
 ├─ vercel.json                  Cấu hình Vercel frontend
 ├─ best_model.pth               CNN checkpoint local
 └─ README.md
@@ -75,8 +75,8 @@ PostgreSQL/Supabase là tùy chọn. Nếu không có `SUPABASE_DB_URL`, backend
 ## Clone và cài đặt
 
 ```bash
-git clone https://github.com/manhfaa/leafai.git
-cd leafai
+git clone https://github.com/manhfaa/LeafAI.git
+cd LeafAI
 npm install
 ```
 
@@ -297,7 +297,7 @@ Tài liệu nhanh nằm ở `DEPLOY_FREE.md`.
 Gợi ý cấu hình:
 
 - Frontend: Vercel, build `npm run build`.
-- Backend: Render free, dùng `render.yaml`.
+- Backend: Render free, dùng `deploy/render.yaml`.
 - Database: Supabase Postgres hoặc SQLite cho local.
 - CNN: Hugging Face Space free.
 - DeepSeek: set `DEEPSEEK_API_KEY` và `DEEPSEEK_MODEL` trong Vercel env.
