@@ -22,7 +22,7 @@ services:
       - key: CORS_ALLOWED_ORIGIN_REGEXES
         value: ^https://.*\.vercel\.app$
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://leafai-backend.onrender.com,https://*.vercel.app
+        value: https://leafai-backend-0ews.onrender.com,https://*.vercel.app
       - key: CNN_API_URL
         value: https://phamducmanh-leafai-cnn-api.hf.space
       - key: SECRET_KEY

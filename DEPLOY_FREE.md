@@ -6,6 +6,11 @@ This project can run all current features on free tiers by splitting services:
 - Backend: Render Free Web Service, using `backend/`.
 - Database: Supabase Free Postgres.
 
+Current live services:
+
+- Frontend: https://leafai-frontend.vercel.app
+- Backend: https://leafai-backend-0ews.onrender.com
+
 Do not deploy the frontend as a Render web service if the goal is to stay free. Two always-on Render web services can exceed the monthly free instance-hour budget.
 
 ## 1. Create Supabase database
@@ -55,15 +60,17 @@ ALLOWED_HOSTS=.onrender.com
 FRONTEND_ORIGIN=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGINS=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$
-CSRF_TRUSTED_ORIGINS=https://leafai-backend.onrender.com,https://*.vercel.app
+CSRF_TRUSTED_ORIGINS=https://leafai-backend-0ews.onrender.com,https://*.vercel.app
 SECRET_KEY=<generate a strong secret>
 SUPABASE_DB_URL=<your Supabase Postgres connection string>
 ```
 
+The current Render service was created with the CLI and `DEBUG=True` so it can run on SQLite before Supabase is connected. For production, set `DEBUG=False`, add `SUPABASE_DB_URL`, and redeploy.
+
 After the backend deploys, verify:
 
 ```text
-https://leafai-backend.onrender.com/admin/login/
+https://leafai-backend-0ews.onrender.com/admin/login/
 ```
 
 ## 3. Deploy Next.js frontend on Vercel
@@ -84,8 +91,8 @@ Node.js Version: 20.x
 Set these frontend environment variables on Vercel:
 
 ```env
-DJANGO_BASE_URL=https://leafai-backend.onrender.com
-NEXT_PUBLIC_API_BASE_URL=https://leafai-backend.onrender.com
+DJANGO_BASE_URL=https://leafai-backend-0ews.onrender.com
+NEXT_PUBLIC_API_BASE_URL=https://leafai-backend-0ews.onrender.com
 ```
 
 The Next.js API route `/api/django/...` uses `DJANGO_BASE_URL` to proxy browser requests to Django.
@@ -98,7 +105,7 @@ After Vercel gives the real frontend URL, update these Render backend variables 
 FRONTEND_ORIGIN=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGINS=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$
-CSRF_TRUSTED_ORIGINS=https://leafai-backend.onrender.com,https://*.vercel.app
+CSRF_TRUSTED_ORIGINS=https://leafai-backend-0ews.onrender.com,https://*.vercel.app
 ```
 
 Redeploy or restart the Render backend.
