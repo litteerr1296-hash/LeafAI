@@ -2,7 +2,7 @@
 
 LeafAI là ứng dụng chẩn đoán ảnh lá cây và hỗ trợ canh tác. Repo này chứa cả frontend Next.js và backend Django để người clone về có thể chạy local, phát triển tiếp và deploy.
 
-Repo GitHub: https://github.com/manhfaa/LeafAI
+Repo GitHub: https://github.com/litteerr1296-hash/LeafAI
 
 ## Tính năng hiện có
 
@@ -75,7 +75,7 @@ PostgreSQL/Supabase là tùy chọn. Nếu không có `SUPABASE_DB_URL`, backend
 ## Clone và cài đặt
 
 ```bash
-git clone https://github.com/manhfaa/LeafAI.git
+git clone https://github.com/litteerr1296-hash/LeafAI.git
 cd LeafAI
 npm install
 ```
