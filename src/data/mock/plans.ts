@@ -1,0 +1,66 @@
+import { PricingPlan } from "@/types";
+
+export const pricingPlans: PricingPlan[] = [
+  {
+    id: "seed",
+    name: "Seed",
+    icon: "🌱",
+    price: "Miễn phí",
+    description: "Bắt đầu khám phá — kiểm tra lá cây, lưu lịch sử ngắn, chat AI cơ bản.",
+    cta: "Dùng miễn phí",
+    features: [
+      "Kiểm tra ảnh lá cây (5 lần/ngày)",
+      "Lưu lịch sử 7 ngày gần nhất",
+      "Chat AI (3 câu/ngày)",
+      "Tải ảnh hoặc chụp trực tiếp",
+    ],
+  },
+  {
+    id: "grow",
+    name: "Grow",
+    icon: "🌿",
+    price: "9.000đ/tháng",
+    description: "Phát triển đều đặn — tần suất cao hơn, lịch sử dài hơn, bắt đầu lập kế hoạch.",
+    cta: "Nâng cấp Grow",
+    features: [
+      "Kiểm tra ảnh lá cây (30 lần/ngày)",
+      "Lưu lịch sử 30 ngày",
+      "Chat AI (20 câu/ngày)",
+      "Lập kế hoạch trồng cây (2 kế hoạch)",
+    ],
+  },
+  {
+    id: "bloom",
+    name: "Bloom",
+    icon: "🌳",
+    price: "39.000đ/tháng",
+    description: "Nở rộ toàn diện — không giới hạn kiểm tra, chat chuyên gia, ưu tiên xử lý.",
+    cta: "Nâng cấp Bloom",
+    highlight: true,
+    badge: "Phổ biến nhất",
+    features: [
+      "Kiểm tra ảnh lá không giới hạn",
+      "Lưu toàn bộ lịch sử",
+      "Chat AI không giới hạn",
+      "Chat chuyên gia nông nghiệp",
+      "Lập kế hoạch trồng cây (10 kế hoạch)",
+      "Ưu tiên tốc độ xử lý",
+      "Hỗ trợ qua email",
+    ],
+  },
+  {
+    id: "elite",
+    name: "Elite",
+    icon: "👑",
+    price: "99.000đ/tháng",
+    description: "Đỉnh cao chuyên nghiệp — xuất PDF, API access, hỗ trợ ưu tiên.",
+    cta: "Nâng cấp Elite",
+    features: [
+      "Tất cả tính năng Bloom",
+      "Xuất báo cáo PDF",
+      "API access",
+      "Kế hoạch trồng cây không giới hạn",
+      "Hỗ trợ ưu tiên qua email + chat",
+    ],
+  },
+];

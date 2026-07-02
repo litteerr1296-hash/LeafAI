@@ -1,0 +1,30 @@
+.next
+node_modules
+out
+dist
+.vercel
+.env
+.env*.local
+.tmp
+*.log
+.DS_Store
+
+# Python/runtime artifacts
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.sqlite3
+backend/staticfiles
+backend/.pip-cache
+backend/db.sqlite3
+
+# Local model/checkpoint artifacts
+moduleyolola
+*.pth
+hf_space/best_model.pth
+
+.pydeps
+.pydeps-local

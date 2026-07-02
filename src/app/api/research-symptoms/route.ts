@@ -1,0 +1,684 @@
+import { NextResponse } from "next/server";
+
+type Prediction = {
+  class_name?: string;
+  plant_name?: string;
+  disease_name?: string;
+  plant_name_en?: string;
+  disease_name_en?: string;
+  confidence?: number;
+};
+
+type ResearchRequest = {
+  symptoms?: string;
+  selectedPrediction?: Prediction | null;
+  topPredictions?: Prediction[];
+};
+
+type TavilyResult = {
+  title?: string;
+  url?: string;
+  content?: string;
+  raw_content?: string;
+  score?: number;
+};
+
+type TavilySearchResponse = {
+  query?: string;
+  answer?: string;
+  results?: TavilyResult[];
+};
+
+type ResearchSource = {
+  id: number;
+  title: string;
+  url: string;
+  snippet: string;
+  rawContent: string;
+};
+
+type SearchPromptResult = {
+  displayQuestion: string;
+  tavilyQuery: string;
+};
+
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-v4-flash";
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY;
+const TAVILY_API_URL = "https://api.tavily.com/search";
+
+function cleanText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function describePrediction(prediction?: Prediction | null) {
+  if (!prediction) return "Không rõ";
+  return [
+    prediction.plant_name || prediction.plant_name_en || "Cây chưa rõ",
+    prediction.disease_name || prediction.disease_name_en || prediction.class_name || "bệnh chưa rõ",
+    prediction.confidence != null ? `độ tin cậy ${Math.round(prediction.confidence * 100)}%` : "",
+  ]
+    .filter(Boolean)
+    .join(" - ");
+}
+
+function extractJsonObject(text: string) {
+  const normalized = text
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const fullParse = JSON.parse(normalized) as unknown;
+    if (typeof fullParse === "string") {
+      return extractJsonObject(fullParse);
+    }
+    if (Array.isArray(fullParse)) {
+      return { items: fullParse };
+    }
+    if (isRecord(fullParse)) {
+      return fullParse;
+    }
+  } catch {
+    // Fall back to extracting the first object from mixed text.
+  }
+
+  const start = normalized.indexOf("{");
+  const end = normalized.lastIndexOf("}");
+  if (start < 0 || end <= start) return null;
+  try {
+    const firstParse = JSON.parse(normalized.slice(start, end + 1)) as unknown;
+    if (typeof firstParse === "string") {
+      return extractJsonObject(firstParse);
+    }
+    return firstParse as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeDeepSeekJsonText(value: unknown) {
+  const text = cleanText(value);
+  const parsed = extractJsonObject(text);
+  if (parsed) return parsed;
+  return null;
+}
+
+function pickStringField(source: Record<string, unknown> | null, keys: string[]) {
+  for (const key of keys) {
+    const value = cleanText(source?.[key]);
+    if (value) return value;
+  }
+  return "";
+}
+
+function collectStringFields(value: unknown, path: string[] = []): Array<{ key: string; value: string }> {
+  if (typeof value === "string") {
+    const text = cleanText(value);
+    return text ? [{ key: path.join("."), value: text }] : [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectStringFields(item, [...path, String(index)]));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => collectStringFields(item, [...path, key]));
+  }
+
+  return [];
+}
+
+function looksLikeVietnameseQuestion(value: string) {
+  return /[?？]$/.test(value) || /liệu|có phù hợp|nên được xử lý|như thế nào/i.test(value);
+}
+
+function looksLikeSearchQuery(value: string) {
+  return (
+    !looksLikeVietnameseQuestion(value) &&
+    /disease|symptom|leaf|plant|pepper|apple|corn|raspberry|bacterial|spot|rust|treatment|management|control|extension|university|agriculture/i.test(
+      value,
+    )
+  );
+}
+
+function tryParseSearchPromptResult(generated: string): SearchPromptResult | null {
+  const parsed = normalizeDeepSeekJsonText(generated);
+  let displayQuestion = pickStringField(parsed, [
+    "display_question",
+    "displayQuestion",
+    "question",
+    "user_question",
+    "userQuestion",
+    "search_question",
+    "searchQuestion",
+    "verification_question",
+    "verificationQuestion",
+    "treatment_question",
+    "treatmentQuestion",
+    "compatibility_question",
+    "compatibilityQuestion",
+  ]);
+  let tavilyQuery = pickStringField(parsed, [
+    "tavily_query",
+    "tavilyQuery",
+    "tavily_search_query",
+    "tavilySearchQuery",
+    "query",
+    "search_query",
+    "searchQuery",
+    "search",
+    "search_term",
+    "searchTerm",
+    "web_query",
+    "webQuery",
+  ]);
+
+  const fields = collectStringFields(parsed);
+  if (!displayQuestion) {
+    displayQuestion = fields.find((field) => looksLikeVietnameseQuestion(field.value))?.value ?? "";
+  }
+  if (!tavilyQuery) {
+    tavilyQuery = fields.find((field) => field.value !== displayQuestion && looksLikeSearchQuery(field.value))?.value ?? "";
+  }
+  if ((!displayQuestion || !tavilyQuery) && fields.length >= 2) {
+    displayQuestion ||= fields[0]?.value ?? "";
+    tavilyQuery ||= fields.find((field) => field.value !== displayQuestion)?.value ?? "";
+  }
+
+  if (!displayQuestion || !tavilyQuery) return null;
+  return { displayQuestion, tavilyQuery };
+}
+
+function parseSearchPromptResult(generated: string, step: string): SearchPromptResult {
+  const parsed = tryParseSearchPromptResult(generated);
+  if (parsed) return parsed;
+
+  throw new Error(`DeepSeek chưa trả đúng câu hỏi hiển thị và query Tavily cho bước ${step}.`);
+}
+
+function extractDeepSeekContent(content: unknown) {
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && "text" in part && typeof part.text === "string") return part.text;
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+  return "";
+}
+
+async function repairSearchPromptResult({
+  generated,
+  originalPrompt,
+  step,
+}: {
+  generated: string;
+  originalPrompt: string;
+  step: string;
+}) {
+  const prompt = [
+    "Bạn đang sửa output JSON cho LeafAI.",
+    "Output trước đó của model DeepSeek chưa đúng schema hoặc thiếu key.",
+    "BẮT BUỘC dùng chính ngữ cảnh yêu cầu ban đầu và output trước đó để viết lại đúng 2 trường.",
+    "Không markdown, không giải thích, không bọc ```json.",
+    "Chỉ trả về JSON object hợp lệ với đúng 2 key: display_question và tavily_query.",
+    '{"display_question":"...","tavily_query":"..."}',
+    "",
+    "Yêu cầu ban đầu:",
+    originalPrompt,
+    "",
+    "Output trước đó:",
+    generated,
+  ].join("\n");
+
+  const repaired = await requireDeepSeekText(prompt, 260, `sửa JSON câu search ${step}`);
+  return parseSearchPromptResult(repaired, step);
+}
+
+async function callDeepSeekText(prompt: string, maxOutputTokens = 700, jsonMode = true) {
+  if (!DEEPSEEK_API_KEY) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response = await fetch(DEEPSEEK_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: DEEPSEEK_MODEL,
+        thinking: { type: "disabled" },
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0.2,
+        top_p: 0.9,
+        max_tokens: maxOutputTokens,
+        ...(jsonMode ? { response_format: { type: "json_object" } } : {}),
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      let message = `DeepSeek API lỗi ${response.status}`;
+      try {
+        const errorBody = (await response.json()) as { error?: { message?: string; status?: string; code?: string } };
+        const detail = cleanText(errorBody.error?.status || errorBody.error?.message);
+        if (detail) message += `: ${detail}`;
+      } catch {
+        // Keep the HTTP status when DeepSeek does not return a JSON error body.
+      }
+      throw new Error(message);
+    }
+    const data = (await response.json()) as {
+      choices?: Array<{ finish_reason?: string; message?: { content?: unknown; reasoning_content?: unknown } }>;
+    };
+    const choice = data.choices?.[0];
+    const content =
+      extractDeepSeekContent(choice?.message?.content) || extractDeepSeekContent(choice?.message?.reasoning_content);
+    if (!content && choice) {
+      throw new Error(`DeepSeek trả về nội dung rỗng, finish_reason=${choice.finish_reason || "unknown"}.`);
+    }
+    return content || null;
+  } catch (error) {
+    if (error instanceof Error) throw error;
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requireDeepSeekText(prompt: string, maxOutputTokens: number, step: string) {
+  const text = await callDeepSeekText(prompt, maxOutputTokens);
+  if (!text) {
+    throw new Error(`DeepSeek không hoàn tất bước: ${step}.`);
+  }
+  return text;
+}
+
+function cleanPlainDeepSeekText(value: string) {
+  const text = value
+    .replace(/^```(?:text|json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed === "string") return cleanText(parsed);
+  } catch {
+    // Plain text is expected for these single-field DeepSeek calls.
+  }
+
+  return text.replace(/^["'`]+|["'`]+$/g, "").trim();
+}
+
+async function requireDeepSeekPlainText(prompt: string, maxOutputTokens: number, step: string) {
+  const text = await callDeepSeekText(prompt, maxOutputTokens, false);
+  const cleaned = text ? cleanPlainDeepSeekText(text) : "";
+  if (!cleaned) {
+    throw new Error(`DeepSeek không hoàn tất bước: ${step}.`);
+  }
+  return cleaned;
+}
+
+async function callTavily(query: string) {
+  if (!TAVILY_API_KEY) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response = await fetch(TAVILY_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        api_key: TAVILY_API_KEY,
+        query,
+        search_depth: "advanced",
+        max_results: 5,
+        include_answer: false,
+        include_raw_content: true,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) return null;
+    return (await response.json()) as TavilySearchResponse;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requireTavilySearch(query: string, step: string) {
+  const search = await callTavily(query);
+  if (!search?.results?.length) {
+    throw new Error(`Tavily không trả về nguồn cho bước: ${step}.`);
+  }
+  return search;
+}
+
+function formatSources(results?: TavilyResult[]): ResearchSource[] {
+  return (results ?? [])
+    .filter((result) => result.url)
+    .slice(0, 5)
+    .map((result, index) => ({
+      id: index + 1,
+      title: cleanText(result.title) || `Nguồn ${index + 1}`,
+      url: cleanText(result.url),
+      snippet: cleanText(result.content).slice(0, 480),
+      rawContent: cleanText(result.raw_content || result.content).slice(0, 1800),
+    }));
+}
+
+async function buildCompatibilitySearch(symptoms: string, topPredictions: Prediction[], selectedPrediction?: Prediction | null): Promise<SearchPromptResult> {
+  const context = [
+    `Kết quả CNN đang chọn: ${describePrediction(selectedPrediction)}`,
+    "Top 5 CNN:",
+    ...topPredictions.map((item, index) => `${index + 1}. ${describePrediction(item)}`),
+    `Triệu chứng người dùng nhập: ${symptoms}`,
+  ].join("\n");
+
+  const displayQuestion = await requireDeepSeekPlainText(
+    [
+      "Bạn là trợ lý nông nghiệp của LeafAI.",
+      "Hãy viết đúng 1 câu hỏi tiếng Việt để người dùng thấy hệ thống đang kiểm chứng triệu chứng bằng nguồn web.",
+      "Mẫu ý nghĩa: Liệu bệnh X trên cây Y có phù hợp với triệu chứng Z không?",
+      "Không markdown, không JSON, không giải thích, chỉ trả về đúng 1 câu hỏi.",
+      "",
+      context,
+    ].join("\n"),
+    120,
+    "viết câu hỏi hiển thị kiểm chứng triệu chứng",
+  );
+
+  const tavilyQuery = await requireDeepSeekPlainText(
+    [
+      "Bạn là trợ lý tìm kiếm nông nghiệp cho LeafAI.",
+      "Hãy viết đúng 1 câu search tiếng Anh để đưa trực tiếp vào Tavily.",
+      "Câu search phải kiểm tra xem triệu chứng người dùng nhập có phù hợp với cây/bệnh trong top CNN hay không.",
+      "Bắt buộc có cây, bệnh, triệu chứng; ưu tiên từ khóa extension, university, agriculture.",
+      "Không markdown, không JSON, không giải thích, chỉ trả về đúng query.",
+      "",
+      context,
+    ].join("\n"),
+    120,
+    "viết Tavily query kiểm chứng triệu chứng",
+  );
+
+  return { displayQuestion, tavilyQuery };
+}
+
+async function summarizeCompatibility({
+  symptoms,
+  selectedPrediction,
+  topPredictions,
+  sources,
+}: {
+  symptoms: string;
+  selectedPrediction?: Prediction | null;
+  topPredictions: Prediction[];
+  sources: ResearchSource[];
+}) {
+  const prompt = [
+    "Bạn là chuyên gia nông nghiệp của LeafAI.",
+    "BẮT BUỘC: đọc tất cả thông tin từ các trang Tavily bên dưới rồi tổng hợp cho người dùng.",
+    "Nhiệm vụ: trả lời liệu triệu chứng người dùng nhập có phù hợp với kết quả CNN hoặc một bệnh/cây trong top 5 CNN không.",
+    "Nếu phù hợp với bệnh khác trong top 5 hơn kết quả đang chọn, ghi bệnh đó ở best_match.",
+    "Tóm tắt bằng tiếng Việt dễ hiểu, có trích nguồn dạng [1], [2]. Không bịa thông tin ngoài nguồn.",
+    "Trả về JSON object hợp lệ, không markdown, không bọc ```json, theo schema:",
+    '{"is_consistent":true,"best_match":"...","summary":"...","confidence_note":"..."}',
+    "",
+    `Triệu chứng: ${symptoms}`,
+    `Kết quả CNN đang chọn: ${describePrediction(selectedPrediction)}`,
+    "Top 5 CNN:",
+    ...topPredictions.map((item, index) => `${index + 1}. ${describePrediction(item)}`),
+    "",
+    "Nguồn Tavily:",
+    ...sources.map(
+      (source) =>
+        `[${source.id}] ${source.title} - ${source.url}\nĐoạn trích: ${source.snippet}\nNội dung trang: ${source.rawContent}`,
+    ),
+  ].join("\n");
+
+  const generated = await requireDeepSeekText(prompt, 1200, "đọc nguồn Tavily và tổng hợp độ phù hợp triệu chứng");
+  const parsed = extractJsonObject(generated);
+  return {
+    isConsistent: typeof parsed?.is_consistent === "boolean" ? parsed.is_consistent : false,
+    bestMatch: cleanText(parsed?.best_match || describePrediction(selectedPrediction)),
+    summary: cleanText(parsed?.summary || generated),
+    confidenceNote:
+      cleanText(parsed?.confidence_note) ||
+      "Đây là kiểm chứng tham khảo bằng nguồn web, không thay thế kiểm tra trực tiếp ngoài vườn.",
+    sources,
+  };
+}
+
+async function buildTreatmentSearch(selectedPrediction?: Prediction | null, bestMatch?: string): Promise<SearchPromptResult> {
+  const context = [
+    bestMatch ? `Bệnh/cây phù hợp nhất: ${bestMatch}` : "",
+    `Kết quả CNN đang chọn: ${describePrediction(selectedPrediction)}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const displayQuestion = await requireDeepSeekPlainText(
+    [
+      "Bạn là trợ lý nông nghiệp của LeafAI.",
+      "Hãy viết đúng 1 câu hỏi tiếng Việt để người dùng thấy hệ thống đang tìm phương pháp xử lý ban đầu bằng nguồn web.",
+      "Mẫu ý nghĩa: Liệu bệnh X này nên được xử lý ban đầu như thế nào?",
+      "Không markdown, không JSON, không giải thích, chỉ trả về đúng 1 câu hỏi.",
+      "",
+      context,
+    ].join("\n"),
+    120,
+    "viết câu hỏi hiển thị phương pháp xử lý",
+  );
+
+  const tavilyQuery = await requireDeepSeekPlainText(
+    [
+      "Bạn là trợ lý tìm kiếm nông nghiệp cho LeafAI.",
+      "Hãy viết đúng 1 câu search tiếng Anh để đưa trực tiếp vào Tavily.",
+      "Câu search phải tìm phương pháp xử lý ban đầu, management hoặc control cho cây/bệnh đã chọn.",
+      "Bắt buộc có cây, bệnh, treatment/management/control; ưu tiên từ khóa extension, university, agriculture.",
+      "Không markdown, không JSON, không giải thích, chỉ trả về đúng query.",
+      "",
+      context,
+    ].join("\n"),
+    120,
+    "viết Tavily query phương pháp xử lý",
+  );
+
+  return { displayQuestion, tavilyQuery };
+}
+
+async function summarizeTreatment({
+  selectedPrediction,
+  bestMatch,
+  sources,
+}: {
+  selectedPrediction?: Prediction | null;
+  bestMatch?: string;
+  sources: ResearchSource[];
+}) {
+  const prompt = [
+    "Bạn là chuyên gia nông nghiệp của LeafAI.",
+    "BẮT BUỘC: đọc tất cả thông tin từ các trang Tavily bên dưới rồi tổng hợp phương pháp xử lý cho người dùng.",
+    "Chỉ dùng thông tin có trong nguồn. Không bịa thuốc, liều lượng hoặc khẳng định quá mức nếu nguồn không nêu.",
+    "Tóm tắt ngắn gọn bằng tiếng Việt, có trích nguồn dạng [1], [2].",
+    "Trả về JSON object hợp lệ, không markdown, không bọc ```json, theo schema:",
+    '{"summary":"...","safety_note":"..."}',
+    "",
+    bestMatch ? `Bệnh/cây phù hợp nhất: ${bestMatch}` : "",
+    `Kết quả CNN đang chọn: ${describePrediction(selectedPrediction)}`,
+    "Nguồn Tavily:",
+    ...sources.map(
+      (source) =>
+        `[${source.id}] ${source.title} - ${source.url}\nĐoạn trích: ${source.snippet}\nNội dung trang: ${source.rawContent}`,
+    ),
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const generated = await requireDeepSeekText(prompt, 1200, "đọc nguồn Tavily và tổng hợp phương pháp xử lý");
+  const parsed = extractJsonObject(generated);
+  return {
+    summary: cleanText(parsed?.summary || generated),
+    safetyNote:
+      cleanText(parsed?.safety_note) ||
+      "Luôn đọc nhãn thuốc, dùng bảo hộ và hỏi kỹ thuật viên địa phương trước khi xử lý nếu bệnh lan rộng.",
+    sources,
+  };
+}
+
+async function buildFinalConclusion({
+  symptoms,
+  selectedPrediction,
+  topPredictions,
+  compatibility,
+  treatment,
+}: {
+  symptoms: string;
+  selectedPrediction?: Prediction | null;
+  topPredictions: Prediction[];
+  compatibility: Awaited<ReturnType<typeof summarizeCompatibility>>;
+  treatment: Awaited<ReturnType<typeof summarizeTreatment>>;
+}) {
+  const prompt = [
+    "Bạn là LeafAI.",
+    "BẮT BUỘC: chốt cuối cùng bằng model DeepSeek sau khi pipeline đã chạy đủ:",
+    "1. Model DeepSeek viết câu search kiểm chứng triệu chứng.",
+    "2. Tavily search kiểm chứng.",
+    "3. Model DeepSeek đọc nguồn Tavily và tổng hợp độ phù hợp.",
+    "4. Model DeepSeek viết câu search phương pháp xử lý.",
+    "5. Tavily search phương pháp xử lý.",
+    "6. Model DeepSeek đọc nguồn Tavily và tổng hợp xử lý.",
+    "Bây giờ hãy chốt kết luận cuối cùng cho người dùng bằng tiếng Việt.",
+    "Trả về JSON object hợp lệ, không markdown, không bọc ```json, theo schema:",
+    '{"final_conclusion":"...","user_next_step":"..."}',
+    "",
+    `Triệu chứng: ${symptoms}`,
+    `Kết quả CNN đang chọn: ${describePrediction(selectedPrediction)}`,
+    "Top 5 CNN:",
+    ...topPredictions.map((item, index) => `${index + 1}. ${describePrediction(item)}`),
+    `Độ phù hợp triệu chứng: ${compatibility.isConsistent ? "phù hợp" : "chưa phù hợp rõ"}`,
+    `Best match: ${compatibility.bestMatch}`,
+    `Tóm tắt kiểm chứng: ${compatibility.summary}`,
+    `Tóm tắt xử lý: ${treatment.summary}`,
+    `Lưu ý an toàn: ${treatment.safetyNote}`,
+  ].join("\n");
+
+  const generated = await requireDeepSeekText(prompt, 900, "chốt kết luận cuối cùng");
+  const parsed = extractJsonObject(generated);
+  return {
+    finalConclusion: cleanText(parsed?.final_conclusion || generated),
+    userNextStep:
+      cleanText(parsed?.user_next_step) ||
+      "Theo dõi cây thêm vài ngày và chụp lại nếu triệu chứng lan rộng.",
+  };
+}
+
+export async function POST(request: Request) {
+  let body: ResearchRequest;
+  try {
+    body = (await request.json()) as ResearchRequest;
+  } catch {
+    return NextResponse.json({ error: "Body JSON không hợp lệ." }, { status: 400 });
+  }
+
+  const symptoms = cleanText(body.symptoms);
+  if (!symptoms) {
+    return NextResponse.json({ skipped: true, reason: "Không có triệu chứng để kiểm chứng." });
+  }
+
+  if (!DEEPSEEK_API_KEY) {
+    return NextResponse.json({ error: "Thiếu DEEPSEEK_API_KEY để viết câu search và tổng hợp." }, { status: 503 });
+  }
+
+  if (!TAVILY_API_KEY) {
+    return NextResponse.json({ error: "Thiếu TAVILY_API_KEY để search nguồn web." }, { status: 503 });
+  }
+
+  const selectedPrediction = body.selectedPrediction ?? body.topPredictions?.[0] ?? null;
+  const topPredictions = (body.topPredictions ?? []).slice(0, 5);
+
+  try {
+    const compatibilitySearchPrompt = await buildCompatibilitySearch(symptoms, topPredictions, selectedPrediction);
+    const compatibilitySearch = await requireTavilySearch(compatibilitySearchPrompt.tavilyQuery, "kiểm chứng triệu chứng với kết quả CNN");
+    const compatibilitySources = formatSources(compatibilitySearch.results);
+    const compatibility = await summarizeCompatibility({
+      symptoms,
+      selectedPrediction,
+      topPredictions,
+      sources: compatibilitySources,
+    });
+
+    const treatmentSearchPrompt = await buildTreatmentSearch(selectedPrediction, compatibility.bestMatch);
+    const treatmentSearch = await requireTavilySearch(treatmentSearchPrompt.tavilyQuery, "tìm phương pháp xử lý");
+    const treatmentSources = formatSources(treatmentSearch.results);
+    const treatment = await summarizeTreatment({
+      selectedPrediction,
+      bestMatch: compatibility.bestMatch,
+      sources: treatmentSources,
+    });
+
+    const final = await buildFinalConclusion({
+      symptoms,
+      selectedPrediction,
+      topPredictions,
+      compatibility,
+      treatment,
+    });
+
+    return NextResponse.json({
+      skipped: false,
+      available: true,
+      pipeline: [
+        "deepseek_build_compatibility_query",
+        "tavily_search_compatibility",
+        "deepseek_summarize_compatibility",
+        "deepseek_build_treatment_query",
+        "tavily_search_treatment",
+        "deepseek_summarize_treatment",
+        "deepseek_final_conclusion",
+      ],
+      compatibilityQuestion: compatibilitySearchPrompt.displayQuestion,
+      compatibilityQuery: compatibilitySearchPrompt.tavilyQuery,
+      isSymptomConsistent: compatibility.isConsistent,
+      bestMatch: compatibility.bestMatch,
+      compatibilitySummary: compatibility.summary,
+      confidenceNote: compatibility.confidenceNote,
+      compatibilitySources: compatibility.sources,
+      treatmentQuestion: treatmentSearchPrompt.displayQuestion,
+      treatmentQuery: treatmentSearchPrompt.tavilyQuery,
+      treatmentSummary: treatment.summary,
+      treatmentSafetyNote: treatment.safetyNote,
+      treatmentSources: treatment.sources,
+      finalConclusion: final.finalConclusion,
+      userNextStep: final.userNextStep,
+      generatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Không hoàn tất được pipeline DeepSeek + Tavily.",
+      },
+      { status: 502 },
+    );
+  }
+}
