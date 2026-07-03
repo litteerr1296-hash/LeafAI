@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { MessageCircleMore, ShieldCheck } from "lucide-react";
 
 import { ChatComposer } from "@/components/chat/chat-composer";
@@ -14,6 +14,13 @@ import {
   assistantQuickPrompts,
   expertQuickPrompts,
 } from "@/data/mock/chat";
+import {
+  createChatConversation,
+  createChatMessage,
+  createExpertConsultation,
+  fetchChatConversations,
+  mapDjangoChatMessage,
+} from "@/lib/engagement-client";
 import { ChatApiResponse, ChatMessage, ChatMode, ChatWorkspace, QuickPrompt } from "@/types";
 import { useDiagnosisStore } from "@/store/diagnosis-store";
 import { useSessionStore } from "@/store/session-store";
@@ -28,7 +35,7 @@ function getWorkspaceSubtitle(workspace: ChatWorkspace) {
 }
 
 export default function DashboardChatPage() {
-  const { user } = useSessionStore();
+  const { user, accessToken } = useSessionStore();
   const { records, latestRecordId } = useDiagnosisStore();
 
   const [workspace, setWorkspace] = useState<ChatWorkspace>("assistant");
@@ -42,6 +49,10 @@ export default function DashboardChatPage() {
   const [messagesByMode, setMessagesByMode] = useState<Record<ChatMode, ChatMessage[]>>({
     assistant: [],
     expert: [],
+  });
+  const [conversationIdsByMode, setConversationIdsByMode] = useState<Record<ChatMode, number | null>>({
+    assistant: null,
+    expert: null,
   });
 
   const currentPlan = String(user?.currentPlan ?? "seed");
@@ -75,6 +86,60 @@ export default function DashboardChatPage() {
 
   const voice = useVoiceInput({ onTranscript: handleVoiceTranscript });
 
+  useEffect(() => {
+    if (!accessToken) return;
+
+    let mounted = true;
+    Promise.all([
+      fetchChatConversations(accessToken, "assistant"),
+      fetchChatConversations(accessToken, "expert"),
+    ])
+      .then(([assistantConversations, expertConversations]) => {
+        if (!mounted) return;
+        const assistantConversation = assistantConversations[0];
+        const expertConversation = expertConversations[0];
+
+        setConversationIdsByMode({
+          assistant: assistantConversation?.id ?? null,
+          expert: expertConversation?.id ?? null,
+        });
+        setMessagesByMode((current) => ({
+          assistant: assistantConversation?.messages?.length
+            ? assistantConversation.messages.map(mapDjangoChatMessage)
+            : current.assistant,
+          expert: expertConversation?.messages?.length
+            ? expertConversation.messages.map(mapDjangoChatMessage)
+            : current.expert,
+        }));
+      })
+      .catch(() => {
+        // Chat still works without persisted history when the backend is waking up.
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [accessToken]);
+
+  async function ensureConversation(mode: ChatMode, content: string) {
+    if (!accessToken) return null;
+    const existingId = conversationIdsByMode[mode];
+    if (existingId) return existingId;
+
+    const diagnosisForConversation = mode === "assistant" ? selectedDiagnosis?.id : null;
+    const conversation = await createChatConversation(accessToken, {
+      mode,
+      title: content.trim() || (mode === "expert" ? "Tư vấn chuyên gia" : "Chat AI"),
+      diagnosisId: diagnosisForConversation,
+    });
+
+    setConversationIdsByMode((current) => ({
+      ...current,
+      [mode]: conversation.id,
+    }));
+    return conversation.id;
+  }
+
   async function sendMessage(mode: ChatMode, content: string) {
     if (!content.trim()) return;
 
@@ -93,6 +158,31 @@ export default function DashboardChatPage() {
     setTypingMode(mode);
 
     try {
+      let conversationId: number | null = null;
+      try {
+        conversationId = await ensureConversation(mode, content);
+        if (accessToken && conversationId) {
+          await createChatMessage(accessToken, {
+            conversationId,
+            role: "user",
+            content,
+            meta: {
+              workspace: mode,
+              selectedDiagnosisId: mode === "assistant" ? selectedDiagnosis?.id ?? null : null,
+            },
+          });
+          if (mode === "expert") {
+            await createExpertConsultation(accessToken, {
+              topic: content.slice(0, 120),
+              question: content,
+              conversationId,
+            });
+          }
+        }
+      } catch {
+        conversationId = null;
+      }
+
       const diagnosisForRequest = mode === "assistant" ? selectedDiagnosis : null;
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -112,18 +202,29 @@ export default function DashboardChatPage() {
       }
 
       const data = (await response.json()) as ChatApiResponse;
+      const assistantMessage: ChatMessage = {
+        id: `${mode}-${Date.now()}-assistant`,
+        role: "assistant",
+        content: data.answer,
+        createdAt: data.generatedAt,
+      };
+
+      if (accessToken && conversationId) {
+        createChatMessage(accessToken, {
+          conversationId,
+          role: mode === "expert" ? "expert" : "assistant",
+          content: data.answer,
+          meta: {
+            generatedAt: data.generatedAt,
+          },
+        }).catch(() => {
+          // The answer is already shown; persistence can retry on the next conversation.
+        });
+      }
 
       setMessagesByMode((current) => ({
         ...current,
-        [mode]: [
-          ...current[mode],
-          {
-            id: `${mode}-${Date.now()}-assistant`,
-            role: "assistant",
-            content: data.answer,
-            createdAt: data.generatedAt,
-          },
-        ],
+        [mode]: [...current[mode], assistantMessage],
       }));
     } catch {
       setMessagesByMode((current) => ({

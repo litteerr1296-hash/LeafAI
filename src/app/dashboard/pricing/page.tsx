@@ -2,15 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import { ComparisonTable } from "@/components/pricing/comparison-table";
 import { PricingCard } from "@/components/pricing/pricing-card";
 import { Card } from "@/components/ui/card";
-import { pricingPlans } from "@/data/mock/plans";
+import { pricingPlans as fallbackPricingPlans } from "@/data/mock/plans";
+import { fetchPricingPlansFromApi } from "@/lib/engagement-client";
 import { normalizePlan, PLANS } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/store/session-store";
-import type { PlanTier } from "@/types";
+import type { PlanTier, PricingPlan } from "@/types";
 
 const PLAN_TAGLINES: Record<PlanTier, string> = {
   seed: "Bắt đầu khám phá, không rào cản.",
@@ -24,6 +26,22 @@ export default function DashboardPricingPage() {
   const { user } = useSessionStore();
   const currentPlan = normalizePlan(user?.currentPlan);
   const currentPlanInfo = PLANS[currentPlan];
+  const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>(fallbackPricingPlans);
+
+  useEffect(() => {
+    let mounted = true;
+    fetchPricingPlansFromApi()
+      .then((plans) => {
+        if (mounted) setPricingPlans(plans);
+      })
+      .catch(() => {
+        if (mounted) setPricingPlans(fallbackPricingPlans);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="space-y-6">

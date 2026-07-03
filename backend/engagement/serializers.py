@@ -43,6 +43,13 @@ class UserSubscriptionSerializer(serializers.ModelSerializer):
 
 
 class ChatMessageSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        request = self.context.get("request")
+        conversation = attrs.get("conversation") or getattr(self.instance, "conversation", None)
+        if request and conversation and conversation.user_id != request.user.id:
+            raise serializers.ValidationError("Conversation does not belong to the current user.")
+        return attrs
+
     class Meta:
         model = ChatMessage
         fields = ("id", "conversation", "role", "content", "citations", "meta", "created_at")
@@ -51,6 +58,13 @@ class ChatMessageSerializer(serializers.ModelSerializer):
 
 class ChatConversationSerializer(serializers.ModelSerializer):
     messages = ChatMessageSerializer(many=True, read_only=True)
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        diagnosis = attrs.get("diagnosis") or getattr(self.instance, "diagnosis", None)
+        if request and diagnosis and diagnosis.user_id != request.user.id:
+            raise serializers.ValidationError("Diagnosis does not belong to the current user.")
+        return attrs
 
     class Meta:
         model = ChatConversation
@@ -69,6 +83,16 @@ class ChatConversationSerializer(serializers.ModelSerializer):
 
 
 class ExpertConsultationSerializer(serializers.ModelSerializer):
+    def validate(self, attrs):
+        request = self.context.get("request")
+        diagnosis = attrs.get("diagnosis") or getattr(self.instance, "diagnosis", None)
+        conversation = attrs.get("conversation") or getattr(self.instance, "conversation", None)
+        if request and diagnosis and diagnosis.user_id != request.user.id:
+            raise serializers.ValidationError("Diagnosis does not belong to the current user.")
+        if request and conversation and conversation.user_id != request.user.id:
+            raise serializers.ValidationError("Conversation does not belong to the current user.")
+        return attrs
+
     class Meta:
         model = ExpertConsultation
         fields = (
