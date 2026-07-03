@@ -61,11 +61,12 @@ FRONTEND_ORIGIN=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGINS=https://leafai-frontend.vercel.app
 CORS_ALLOWED_ORIGIN_REGEXES=^https://.*\.vercel\.app$
 CSRF_TRUSTED_ORIGINS=https://leafai-backend-0ews.onrender.com,https://*.vercel.app
+DATABASE_SSL_REQUIRE=False
 SECRET_KEY=<generate a strong secret>
 SUPABASE_DB_URL=<your Supabase Postgres connection string>
 ```
 
-The current Render service was created with the CLI and `DEBUG=True` so it can run on SQLite before Supabase is connected. For production, set `DEBUG=False`, add `SUPABASE_DB_URL`, and redeploy.
+For a Render Postgres database in the same region as the backend, use the internal database URL and keep `DATABASE_SSL_REQUIRE=False`. For Supabase or an external public PostgreSQL URL, set `DATABASE_SSL_REQUIRE=True`.
 
 After the backend deploys, verify:
 

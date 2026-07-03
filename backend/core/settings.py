@@ -66,11 +66,12 @@ ASGI_APPLICATION = "core.asgi.application"
 
 supabase_db_url = os.getenv("SUPABASE_DB_URL", "").strip()
 if supabase_db_url:
+    database_ssl_require = os.getenv("DATABASE_SSL_REQUIRE", "True").lower() == "true"
     DATABASES = {
         "default": dj_database_url.parse(
             supabase_db_url,
             conn_max_age=600,
-            ssl_require=True,
+            ssl_require=database_ssl_require,
         )
     }
 else:

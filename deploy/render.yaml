@@ -23,6 +23,8 @@ services:
         value: ^https://.*\.vercel\.app$
       - key: CSRF_TRUSTED_ORIGINS
         value: https://leafai-backend-0ews.onrender.com,https://*.vercel.app
+      - key: DATABASE_SSL_REQUIRE
+        value: False
       - key: CNN_API_URL
         value: https://phamducmanh-leafai-cnn-api.hf.space
       - key: SECRET_KEY
