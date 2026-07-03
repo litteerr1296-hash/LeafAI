@@ -35,16 +35,6 @@ export interface FeatureItem {
   accent: string;
 }
 
-export interface TeamMember {
-  id: string;
-  name: string;
-  role: string;
-  description: string;
-  responsibilities: string[];
-  presentationFocus: string[];
-  avatar: string;
-}
-
 export interface SupportedPlant {
   id: string;
   name: PlantType;

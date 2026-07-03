@@ -27,7 +27,7 @@ export function MissionSection() {
   return (
     <SectionShell
       eyebrow="Sứ mệnh thương hiệu"
-      title="LeafAI định vị mình là nền tảng nông nghiệp công nghệ cao, sạch, thân thiện và đáng tin cậy."
+      title="LeafAI giúp nông dân nhận diện bệnh lá nhanh, trực quan và đáng tin cậy."
       description={brand.mission}
     >
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
